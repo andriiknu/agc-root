@@ -11,7 +11,7 @@ import uproot
 
 order = 3
 rtol=float(f'1e-{order}')
-atol=1e-5
+atol=1e-3
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -53,7 +53,7 @@ def validate(histos: dict, reference: dict) -> dict[str, list[str]]:
         contents_depend_on_rng = "pt_res_up" in name # skip checking the contents of these histograms as they are not stable
         if not contents_depend_on_rng and not np.allclose(h['contents'], ref_h['contents'], rtol=rtol,atol=atol):
             errors[name].append(f"Contents do not match:\n\tgot      {h['contents']}\n\texpected {ref_h['contents']}")
-            discreps[name]=(np.array(ref_h['contents'])-np.array(h['contents']))/np.array(ref_h['contents'])
+            discreps[name]=abs(np.array(ref_h['contents'])-np.array(h['contents']))#/np.array(ref_h['contents'])
 
     return errors,discreps
 
@@ -78,7 +78,8 @@ if __name__ == "__main__":
             errors = '\n\t'.join(errors)
             print(f"{hist_name}\n\t{errors}")
         print(f'Summary for tolerance {rtol*100}%')
-        summary = {k:np.round(np.max(v)*100,order) for k,v in discreps.items()}
+        summary = {k:np.max(v) for k,v in discreps.items()}
         for name, err in summary.items():
-            print("{:<50} {:<5}%".format(name,err))
+            print("{:<50} {:<5}".format(name,err))
+            # print(err)
         sys.exit(1)

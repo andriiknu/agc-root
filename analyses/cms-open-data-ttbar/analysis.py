@@ -15,6 +15,7 @@ from utils import (
     save_histos,
 )
 
+
 # Using https://atlas-groupdata.web.cern.ch/atlas-groupdata/dev/AnalysisTop/TopDataPreparation/XSection-MC15-13TeV.data
 # as a reference. Values are in pb.
 XSEC_INFO = {
@@ -131,6 +132,8 @@ def define_trijet_mass(df: ROOT.RDataFrame) -> ROOT.RDataFrame:
     # First, select events with at least 2 b-tagged jets
     df = df.Filter("Sum(Jet_btagCSVV2[Jet_pt_mask]>=0.5)>1")
 
+    
+
     # Build four-momentum vectors for each jet
     df = (  
         df.Define(
@@ -171,11 +174,17 @@ def define_trijet_mass(df: ROOT.RDataFrame) -> ROOT.RDataFrame:
         "return ROOT::VecOps::Map(Trijet_p4, [](ROOT::Math::PxPyPzMVector v) { return v.Pt(); })",
     )
 
+    df = df.Define("Trijet_mass_raw", 
+              "return ROOT::VecOps::Map(Trijet_p4, [](ROOT::Math::PxPyPzMVector v) { return v.M(); })"
+              )
+
+
+
     # trijet_btag is a helpful array of bool values indicating whether or not the maximum btag value in trijet is larger than 0.5 threshold
     df = df.Define(
-        "Trijet_btag",
+        "Trijet_btag_mask",
         """
-        ROOT::RVecB btag(nTrijet);
+        ROOT::RVecF btag(nTrijet);
         for (int i = 0; i < nTrijet; ++i)
         {
             int j1 = Trijet[0][i];
@@ -187,25 +196,56 @@ def define_trijet_mass(df: ROOT.RDataFrame) -> ROOT.RDataFrame:
         """,
     )
 
-    # Evaluate mass of trijet with maximum pt and btag higher than threshold
-    df = df.Define(
-        "Trijet_mass",
-        """
-        double mass{};
-        double Pt{};
-        double indx{};
-        for (int i = 0; i < nTrijet; ++i) {
-            if ((Pt < Trijet_pt[i]) && (Trijet_btag[i])) {
-                Pt = Trijet_pt[i];
-                indx = i;
-            }
-        }
-        mass = Trijet_p4[indx].M();
-        return mass;
-        """,
+    df = (
+        df.Define('Trijet_mass_btagged',
+                'Trijet_mass_raw[Trijet_btag_mask]'
+                )
+          .Define('Trijet_pt_btagged', 
+                'Trijet_pt[Trijet_btag_mask]'
+                )  
     )
 
-    return df
+
+    df = (
+        df.Define('Trijet_pt_mask', 'return ROOT::VecOps::ArgMax(Trijet_pt_btagged)')
+          .Define('Trijet_mass', 'Trijet_mass_btagged[Trijet_pt_mask]')
+    )
+    pt = df.Define('HT', 'Trijet_mass_btagged[Trijet_pt_mask]')
+
+    # # Evaluate mass of trijet with maximum pt and btag higher than threshold
+    # df = df.Define(
+    #     "Trijet_mass",
+    #     """
+    #     double mass{};
+    #     double Pt{};
+    #     double indx{};
+    #     int n = Trijet_pt_selected.size();
+    #     for (int i = 0; i < n; ++i) {
+    #         if (Pt < Trijet_pt_selected[i]) {
+    #             Pt = Trijet_pt_selected[i];
+    #             indx = i;
+    #         }
+    #     }
+    #     mass = Trijet_p4[indx].M();
+    #     return mass;
+    #     """,
+    # )
+    # pt = df.Define(
+    #     "HT",
+    #     """
+    #     double Pt{};
+    #     double indx{};
+    #     int n = Trijet_pt_selected.size();
+    #     for (int i = 0; i < n; ++i) {
+    #         if (Pt < Trijet_pt_selected[i]) {
+    #             Pt = Trijet_pt_selected[i];
+    #             indx = i;
+    #         }
+    #     }
+    #     return indx;
+    #     """,
+    # )
+    return df, pt
 
 
 def book_histos(
@@ -273,11 +313,11 @@ def book_histos(
     # fmt: on
 
     # Define trijet_mass observable for the 4j2b region (this one is more complicated)
-    df4j2b = define_trijet_mass(df)
+    df4j2b, pt = define_trijet_mass(df)
 
     # Book histograms and, if needed, their systematic variations
     results = []
-    for df, observable, region in zip([df4j1b, df4j2b], ["HT", "Trijet_mass"], ["4j1b", "4j2b"]):
+    for df, observable, region in zip([df4j1b, df4j2b, pt], ["HT", "Trijet_mass", "HT"], ["4j1b", "4j2b", "interim_4j2b"]):
         histo_model = ROOT.RDF.TH1DModel(
             name=f"{region}_{process}_{variation}", title=process, nbinsx=25, xlow=50, xup=550
         )
