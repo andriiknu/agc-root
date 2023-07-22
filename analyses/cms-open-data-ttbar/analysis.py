@@ -132,7 +132,7 @@ def make_rdf(
     return ROOT.RDataFrame("Events", files)
 
 def machine_learning_part (df: ROOT.RDataFrame) -> ROOT.RDataFrame:
-    return get_features (df)
+    features = get_features (df)
 
 def define_trijet_mass(df: ROOT.RDataFrame) -> ROOT.RDataFrame:
     """Add the trijet_mass observable to the dataframe after applying the appropriate selections."""
