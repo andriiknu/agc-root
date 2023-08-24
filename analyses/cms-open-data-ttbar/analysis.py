@@ -131,9 +131,6 @@ def make_rdf(
 
     return ROOT.RDataFrame("Events", files)
 
-def machine_learning_part (df: ROOT.RDataFrame) -> ROOT.RDataFrame:
-    features = get_features (df)
-
 def define_trijet_mass(df: ROOT.RDataFrame) -> ROOT.RDataFrame:
     """Add the trijet_mass observable to the dataframe after applying the appropriate selections."""
 
@@ -192,7 +189,7 @@ def book_histos(
     variation: str,
     nevents: int,
     inference = False
-) -> list[AGCResult]:
+) -> tuple[list[AGCResult]]:
     """Return the RDataFrame results pertaining to the desired process and variation."""
     # Calculate normalization for MC
     x_sec = XSEC_INFO[process]
@@ -264,14 +261,13 @@ def book_histos(
 
     # not strict condition is used because the same selection cut is applied in the reference implementation
     # https://github.com/iris-hep/analysis-grand-challenge/blob/main/analyses/cms-open-data-ttbar/ttbar_analysis_pipeline.py#L254
-    df4j1b = df.Filter("Sum(Jet_btagCSVV2_cut >= 0.5) == 1")\
+    df4j1b = df.Filter("Sum(Jet_btagCSVV2_cut > 0.5) == 1")\
                .Define("HT", "Sum(Jet_pt_cut)")
     # fmt: on
 
     # Define trijet_mass observable for the 4j2b region (this one is more complicated)
     df4j2b = define_trijet_mass(df)
 
-    if inference: df_ml = machine_learning_part (df)
 
     # Select the right VariationsFor function depending on RDF or DistRDF
     if type(df).__module__ == "DistRDF.Proxy":
@@ -281,22 +277,56 @@ def book_histos(
 
     # Book histograms and, if needed, their systematic variations
     results = []
-    for df, observable, region in zip([df4j1b, df4j2b], ["HT", "Trijet_mass"], ["4j1b", "4j2b"]):
+    # for df, observable, region in zip([df4j1b, df4j2b], ["HT", "Trijet_mass"], ["4j1b", "4j2b"]):
+    #     histo_model = ROOT.RDF.TH1DModel(
+    #         name=f"{region}_{process}_{variation}", title=process, nbinsx=25, xlow=50, xup=550
+    #     )
+    #     nominal_histo = df.Histo1D(histo_model, observable, "Weights")
+
+    #     if variation == "nominal":
+    #         varied_histos = variationsfor_func(nominal_histo)
+    #         results.append(AGCResult(varied_histos, region, process, variation, nominal_histo))
+    #     else:
+    #         results.append(AGCResult(nominal_histo, region, process, variation, nominal_histo))
+    #     print(f"Booked histogram {histo_model.fName}")
+
+    ml_results = []
+    
+    if not inference: return (results, ml_results)
+
+    df4j2b_ml =  define_features (df4j2b)
+
+    # for observable in ['dR_lep', 'dR_W', 'dR_had1', 'dR_had2', 
+    #                     'M_lep', 'M_W', 'M_W_had', 'Pt_W_had', 
+    #                     'JetW1_pt', 'JetW2_pt', 'JetbL_pt', 'JetbH_pt',  
+    #                     'JetW1_btagCSVV2', 'JetW2_btagCSVV2', 'JetbL_btagCSVV2', 'JetbH_btagCSVV2', 
+    #                     'JetW1_qgl', 'JetW2_qgl', 'JetbL_qgl', 'JetbH_qgl']:
+    #     df4j2b_ml = df4j2b_ml.Define(observable, "ROOT::RVecF({1.})")
+    for observable in ['dR_lep', 'dR_W', 'dR_had1', 'dR_had2', 
+                       # 'M_lep', 'M_W', 'M_W_had', 'Pt_W_had', 
+                        'JetW1_pt', 'JetW2_pt', 'JetbL_pt', 'JetbH_pt',  
+                        'JetW1_btagCSVV2', 'JetW2_btagCSVV2', 'JetbL_btagCSVV2', 'JetbH_btagCSVV2', 
+                        'JetW1_qgl', 'JetW2_qgl', 'JetbL_qgl', 'JetbH_qgl']:
+    
+    # for observable in ['M_lep', 'M_W', 'M_W_had', 'Pt_W_had']:  
+        region = observable  
         histo_model = ROOT.RDF.TH1DModel(
             name=f"{region}_{process}_{variation}", title=process, nbinsx=25, xlow=50, xup=550
         )
-        nominal_histo = df.Histo1D(histo_model, observable, "Weights")
+        nominal_histo = df4j2b_ml.Define(f'f{observable}', f'{observable}[0]').Histo1D(histo_model, f'f{observable}', "Weights")
 
         if variation == "nominal":
             varied_histos = variationsfor_func(nominal_histo)
-            results.append(AGCResult(varied_histos, region, process, variation, nominal_histo))
+            ml_results.append(AGCResult(varied_histos, region, process, variation, nominal_histo))
         else:
-            results.append(AGCResult(nominal_histo, region, process, variation, nominal_histo))
+            ml_results.append(AGCResult(nominal_histo, region, process, variation, nominal_histo))
         print(f"Booked histogram {histo_model.fName}")
+
+    
 
     # Return the booked results
     # Note that no event loop has run yet at this point (RDataFrame is lazy)
-    return results
+    return (results, ml_results)
 
 
 def load_cpp():
@@ -345,27 +375,38 @@ def main() -> None:
         args.n_max_files_per_sample, args.remote_data_prefix, args.data_cache
     )
     results: list[AGCResult] = []
+    ml_results: list[AGCResult] = []
 
     if args.inference: 
         inference = True
-        define_cpp()
+        define_cpp("./fastforest")
     else: inference = False
     for input in inputs:
         df = make_rdf(input.paths, client, args.npartitions)
-        results += book_histos(df, input.process, input.variation, input.nevents, inference=inference)
+        hist_list, ml_hist_list = book_histos(df, input.process, input.variation, input.nevents, inference=inference)
+        results += hist_list
+        ml_results += ml_hist_list
+    print(results)
     print(f"Building the computation graphs took {time() - program_start:.2f} seconds")
 
     # Run the event loops for all processes and variations here
     run_graphs_start = time()
     run_graphs([r.nominal_histo for r in results])
+    run_graphs([r.nominal_histo for r in ml_results])
     print(f"Executing the computation graphs took {time() - run_graphs_start:.2f} seconds")
     if client is not None:
         client.close()
 
     results = postprocess_results(results)
     save_plots(results)
+
     save_histos([r.histo for r in results], output_fname=args.output)
     print(f"Result histograms saved in file {args.output}")
+    if inference:
+        output_fname=args.output.split('.root')[0]+'_ml.root'
+        save_histos([r.histo for r in postprocess_results(ml_results)], output_fname=output_fname)
+        print(f"Result histograms saved in file {output_fname}")
+
 
 
 if __name__ == "__main__":

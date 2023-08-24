@@ -1,6 +1,6 @@
 import ROOT
 
-def define_cpp ():
+def define_cpp (fastforest_path):
     '''
     Naive implementation for generating permutations.
     Iteration is over all possible permutations repetinions are  removed on spot.
@@ -37,13 +37,26 @@ def define_cpp ():
         return permutations;     
     }
     '''
-)
+    )
+    import os
+    include = os.path.join(fastforest_path, 'include')
+    lib = os.path.join(fastforest_path, 'lib')
+    ROOT.gSystem.AddIncludePath(f"-I{include}")
+    ROOT.gSystem.AddLinkedLibs(f"-L{lib} -lfastforest")
+    ROOT.gSystem.Load(f"{lib}/libfastforest.so.1")
+    ROOT.gSystem.CompileMacro("ml_helpers.cpp", "kO")
+
+    ROOT.gInterpreter.Declare('''
+                              auto models = get_fastforests("models/", 20);
+                              auto feven = models["even"];
+                              auto fodd = models["odd"];
+                              ''')
 
 
-def get_features (df: ROOT.RDataFrame, MAX_N_JETS = 6)->ROOT.RDataFrame:
+def define_features (df: ROOT.RDataFrame, MAX_N_JETS = 6)->ROOT.RDataFrame:
 
     # prepare lepton fields (p4, eta, phi)
-    features = (
+    df2 = (
 
         df.Define('Electron_phi_cut', 'Electron_phi[Electron_mask]')
           .Define('Electron_eta_cut', 'Electron_eta[Electron_mask]')
@@ -80,8 +93,8 @@ def get_features (df: ROOT.RDataFrame, MAX_N_JETS = 6)->ROOT.RDataFrame:
     )
 
     # get indexes of four jets
-    features = (
-        features.Define(
+    df2 = (
+        df2.Define(
             'Fourjets_idx', 
             f'GetJetsPermutations(Jet_pt_cut, {MAX_N_JETS})'
         )
@@ -103,9 +116,9 @@ def get_features (df: ROOT.RDataFrame, MAX_N_JETS = 6)->ROOT.RDataFrame:
         )
     )
 
-    # Apply indexes to jets. Jets pt and btagCSVV2 and qgl are features itself (12 features)
-    features = (
-        features
+    # # Apply indexes to jets. Jets pt and btagCSVV2 and qgl are features itself (12 features)
+    df2 = (
+        df2
 
              # not features themself, but needed to construct features
             .Define('JetW1_phi', 'Take(Jet_phi_cut, W1_idx)')
@@ -117,7 +130,7 @@ def get_features (df: ROOT.RDataFrame, MAX_N_JETS = 6)->ROOT.RDataFrame:
             .Define('JetbL_eta', 'Take(Jet_eta_cut, bL_idx)')
             .Define('JetbH_eta', 'Take(Jet_eta_cut, bH_idx)')
 
-            # 12 features
+    #         # 12 features
             .Define('JetW1_pt', 'Take(Jet_pt_cut, W1_idx)')
             .Define('JetW2_pt','Take(Jet_pt_cut, W2_idx)')
             .Define('JetbL_pt', 'Take(Jet_pt_cut, bL_idx)')
@@ -134,7 +147,7 @@ def get_features (df: ROOT.RDataFrame, MAX_N_JETS = 6)->ROOT.RDataFrame:
             .Define('JetbL_qgl', 'Take(Jet_qgl_cut, bL_idx)')
             .Define('JetbH_qgl', 'Take(Jet_qgl_cut, bH_idx)')
 
-            # four - momentumes
+    #         # four - momentumes
 
             .Define(
                 'JetW1_p4', 
@@ -154,10 +167,10 @@ def get_features (df: ROOT.RDataFrame, MAX_N_JETS = 6)->ROOT.RDataFrame:
             )            
     )
 
-    # build features 8 other features
-    features = (
+    # # build features 8 other features
+    df2 = (
 
-        features.Define(
+        df2.Define(
             'dR_lep',
             'sqrt(pow(Lepton_eta-JetbL_eta,2)+pow(Lepton_phi-JetbL_phi,2))'
         ).Define(
@@ -176,11 +189,34 @@ def get_features (df: ROOT.RDataFrame, MAX_N_JETS = 6)->ROOT.RDataFrame:
         ).Define(
             'M_W_had', 'return Map(JetW1_p4+JetW2_p4+JetbH_p4, [] (const ROOT::Math::PxPyPzMVector &p) {return p.M();})'
         ).Define(
-            'M_W_lep', 'return Map(JetW1_p4+JetW2_p4+JetbL_p4, [] (const ROOT::Math::PxPyPzMVector &p) {return p.M();})'
+            'Pt_W_had', 'return Map(JetW1_p4+JetW2_p4+JetbH_p4, [] (const ROOT::Math::PxPyPzMVector &p) {return p.Pt();})'
         )
     ) 
 
-
-    return features
     
+
+    return df2
+    
+
+def predict (df: ROOT.RDataFrame)->ROOT.RDataFrame:
+
+    
+    df2 = df.Define("perm_idx", 
+        """
+        bool is_even = (event % 2 == 0);
+        const auto& forest = (is_even) ? feven : fodd;
+        auto features = std::vector<ROOT::RVecF>({
+            dR_lep, dR_W, dR_had1, dR_had2, 
+            M_lep, M_W, M_W_had, Pt_W_had, 
+            JetW1_pt, JetW2_pt, JetbL_pt, JetbH_pt, 
+            JetW1_btagCSVV2, JetW2_btagCSVV2, JetbL_btagCSVV2, JetbH_btagCSVV2, 
+            JetW1_qgl, JetW2_qgl, JetbL_qgl, JetbH_qgl
+        });
+        auto result  = inference(features, forest, true);
+        return ArgMax(result);
+        """
+    )
+
+    return df2
+
 
