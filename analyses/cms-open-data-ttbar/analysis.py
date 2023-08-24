@@ -6,7 +6,7 @@ from typing import Optional
 
 import ROOT
 from distributed import Client, LocalCluster, SSHCluster, get_worker
-from plotting import save_plots
+from plotting import save_plots, save_ml_plots
 from utils import (
     AGCInput,
     AGCResult,
@@ -14,6 +14,8 @@ from utils import (
     retrieve_inputs,
     save_histos,
 )
+
+from ml import *
 
 # Using https://atlas-groupdata.web.cern.ch/atlas-groupdata/dev/AnalysisTop/TopDataPreparation/XSection-MC15-13TeV.data
 # as a reference. Values are in pb.
@@ -187,7 +189,7 @@ def book_histos(
     variation: str,
     nevents: int,
     inference = False
-) -> list[AGCResult]:
+) -> tuple[list[AGCResult]]:
     """Return the RDataFrame results pertaining to the desired process and variation."""
     # Calculate normalization for MC
     x_sec = XSEC_INFO[process]
@@ -259,13 +261,12 @@ def book_histos(
 
     # not strict condition is used because the same selection cut is applied in the reference implementation
     # https://github.com/iris-hep/analysis-grand-challenge/blob/main/analyses/cms-open-data-ttbar/ttbar_analysis_pipeline.py#L254
-    df4j1b = df.Filter("Sum(Jet_btagCSVV2_cut >= 0.5) == 1")\
+    df4j1b = df.Filter("Sum(Jet_btagCSVV2_cut > 0.5) == 1")\
                .Define("HT", "Sum(Jet_pt_cut)")
     # fmt: on
 
     # Define trijet_mass observable for the 4j2b region (this one is more complicated)
     df4j2b = define_trijet_mass(df)
-
     # Select the right VariationsFor function depending on RDF or DistRDF
     if type(df).__module__ == "DistRDF.Proxy":
         variationsfor_func = ROOT.RDF.Experimental.Distributed.VariationsFor
@@ -287,9 +288,31 @@ def book_histos(
             results.append(AGCResult(nominal_histo, region, process, variation, nominal_histo))
         print(f"Booked histogram {histo_model.fName}")
 
+    ml_results = []
+    
+    if not inference: return (results, ml_results)
+
+    df4j2b =  define_features (df4j2b)
+    df4j2b = infer(df4j2b)
+
+    # Book histograms and, if needed, their systematic variations
+    for i, observable in enumerate(features["names"]):  
+        histo_model = ROOT.RDF.TH1DModel(
+            name=f"{observable}_{process}_{variation}", title=process, nbinsx=25, xlow=features["bin_low"][i], xup=features["bin_high"][i]
+        )
+
+        nominal_histo = df4j2b.Histo1D(histo_model, f'results{i}', "Weights")
+
+        if variation == "nominal":
+            varied_histos = variationsfor_func(nominal_histo)
+            ml_results.append(AGCResult(varied_histos, observable, process, variation, nominal_histo))
+        else:
+            ml_results.append(AGCResult(nominal_histo, observable, process, variation, nominal_histo))
+        print(f"Booked histogram {histo_model.fName}")   
+    
     # Return the booked results
     # Note that no event loop has run yet at this point (RDataFrame is lazy)
-    return results
+    return (results, ml_results)
 
 
 def load_cpp():
@@ -338,15 +361,22 @@ def main() -> None:
         args.n_max_files_per_sample, args.remote_data_prefix, args.data_cache
     )
     results: list[AGCResult] = []
+    ml_results: list[AGCResult] = []
+
+    if args.inference: 
+        define_cpp("./fastforest", 4)
 
     for input in inputs:
         df = make_rdf(input.paths, client, args.npartitions)
-        results += book_histos(df, input.process, input.variation, input.nevents, inference=args.inference)
+        hist_list, ml_hist_list = book_histos(df, input.process, input.variation, input.nevents, inference=args.inference)
+        results += hist_list
+        ml_results += ml_hist_list
     print(f"Building the computation graphs took {time() - program_start:.2f} seconds")
 
     # Run the event loops for all processes and variations here
     run_graphs_start = time()
-    run_graphs([r.nominal_histo for r in results])
+    run_graphs([r.nominal_histo for r in results+ml_results])
+
     print(f"Executing the computation graphs took {time() - run_graphs_start:.2f} seconds")
     if client is not None:
         client.close()
@@ -355,6 +385,14 @@ def main() -> None:
     save_plots(results)
     save_histos([r.histo for r in results], output_fname=args.output)
     print(f"Result histograms saved in file {args.output}")
+    
+    if args.inference:
+        ml_results = postprocess_results(ml_results)
+        save_ml_plots(ml_results)
+        output_fname=args.output.split('.root')[0]+'_ml.root'
+        save_histos([r.histo for r in ml_results], output_fname=output_fname)
+        print(f"Result histograms saved in file {output_fname}")
+
 
 
 if __name__ == "__main__":
