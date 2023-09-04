@@ -15,7 +15,7 @@ from utils import (
     save_histos,
 )
 
-from ml_helpers import *
+from ml import *
 
 # Using https://atlas-groupdata.web.cern.ch/atlas-groupdata/dev/AnalysisTop/TopDataPreparation/XSection-MC15-13TeV.data
 # as a reference. Values are in pb.
@@ -277,43 +277,32 @@ def book_histos(
 
     # Book histograms and, if needed, their systematic variations
     results = []
-    # for df, observable, region in zip([df4j1b, df4j2b], ["HT", "Trijet_mass"], ["4j1b", "4j2b"]):
-    #     histo_model = ROOT.RDF.TH1DModel(
-    #         name=f"{region}_{process}_{variation}", title=process, nbinsx=25, xlow=50, xup=550
-    #     )
-    #     nominal_histo = df.Histo1D(histo_model, observable, "Weights")
+    for df, observable, region in zip([df4j1b, df4j2b], ["HT", "Trijet_mass"], ["4j1b", "4j2b"]):
+        histo_model = ROOT.RDF.TH1DModel(
+            name=f"{region}_{process}_{variation}", title=process, nbinsx=25, xlow=50, xup=550
+        )
+        nominal_histo = df.Histo1D(histo_model, observable, "Weights")
 
-    #     if variation == "nominal":
-    #         varied_histos = variationsfor_func(nominal_histo)
-    #         results.append(AGCResult(varied_histos, region, process, variation, nominal_histo))
-    #     else:
-    #         results.append(AGCResult(nominal_histo, region, process, variation, nominal_histo))
-    #     print(f"Booked histogram {histo_model.fName}")
+        if variation == "nominal":
+            varied_histos = variationsfor_func(nominal_histo)
+            results.append(AGCResult(varied_histos, region, process, variation, nominal_histo))
+        else:
+            results.append(AGCResult(nominal_histo, region, process, variation, nominal_histo))
+        print(f"Booked histogram {histo_model.fName}")
 
     ml_results = []
     
     if not inference: return (results, ml_results)
 
-    df4j2b_ml =  define_features (df4j2b)
+    df4j2b_ml =  define_features (df4j2b, MAX_N_JETS=4)
 
-    # for observable in ['dR_lep', 'dR_W', 'dR_had1', 'dR_had2', 
-    #                     'M_lep', 'M_W', 'M_W_had', 'Pt_W_had', 
-    #                     'JetW1_pt', 'JetW2_pt', 'JetbL_pt', 'JetbH_pt',  
-    #                     'JetW1_btagCSVV2', 'JetW2_btagCSVV2', 'JetbL_btagCSVV2', 'JetbH_btagCSVV2', 
-    #                     'JetW1_qgl', 'JetW2_qgl', 'JetbL_qgl', 'JetbH_qgl']:
-    #     df4j2b_ml = df4j2b_ml.Define(observable, "ROOT::RVecF({1.})")
-    for observable in ['dR_lep', 'dR_W', 'dR_had1', 'dR_had2', 
-                       # 'M_lep', 'M_W', 'M_W_had', 'Pt_W_had', 
-                        'JetW1_pt', 'JetW2_pt', 'JetbL_pt', 'JetbH_pt',  
-                        'JetW1_btagCSVV2', 'JetW2_btagCSVV2', 'JetbL_btagCSVV2', 'JetbH_btagCSVV2', 
-                        'JetW1_qgl', 'JetW2_qgl', 'JetbL_qgl', 'JetbH_qgl']:
-    
-    # for observable in ['M_lep', 'M_W', 'M_W_had', 'Pt_W_had']:  
+    for observable in features:
+        
         region = observable  
         histo_model = ROOT.RDF.TH1DModel(
             name=f"{region}_{process}_{variation}", title=process, nbinsx=25, xlow=50, xup=550
         )
-        nominal_histo = df4j2b_ml.Define(f'f{observable}', f'{observable}[0]').Histo1D(histo_model, f'f{observable}', "Weights")
+        nominal_histo = df4j2b_ml.Define(f'f{observable}', f'{observable}').Histo1D(histo_model, f'f{observable}', "Weights")
 
         if variation == "nominal":
             varied_histos = variationsfor_func(nominal_histo)
@@ -386,13 +375,13 @@ def main() -> None:
         hist_list, ml_hist_list = book_histos(df, input.process, input.variation, input.nevents, inference=inference)
         results += hist_list
         ml_results += ml_hist_list
-    print(results)
     print(f"Building the computation graphs took {time() - program_start:.2f} seconds")
 
     # Run the event loops for all processes and variations here
     run_graphs_start = time()
     run_graphs([r.nominal_histo for r in results])
     run_graphs([r.nominal_histo for r in ml_results])
+
     print(f"Executing the computation graphs took {time() - run_graphs_start:.2f} seconds")
     if client is not None:
         client.close()
@@ -404,7 +393,9 @@ def main() -> None:
     print(f"Result histograms saved in file {args.output}")
     if inference:
         output_fname=args.output.split('.root')[0]+'_ml.root'
-        save_histos([r.histo for r in postprocess_results(ml_results)], output_fname=output_fname)
+        ml_results = postprocess_results(ml_results)
+        # save_plots(ml_results)
+        save_histos([r.histo for r in ml_results], output_fname=output_fname)
         print(f"Result histograms saved in file {output_fname}")
 
 

@@ -2,7 +2,40 @@
 #include <cmath>
 #include <assert.h>
 #include <map>
+#include <algorithm>
 #include "ROOT/RVec.hxx"
+
+std::map<std::string, std::vector<int>> _get_permut_indexes (std::string jet_labels) {
+
+    std::sort(jet_labels.begin(), jet_labels.end());
+    std::map<std::string, std::vector<int>> permutations;
+    int count = 0, N = jet_labels.size();
+    do { 
+        for (int idx = 0; idx < N; ++idx) {
+            std::string label = std::string(1, jet_labels[idx]);
+            if (label == "o") continue;
+            if (label == "w") label+=std::to_string(++count);
+            permutations[label].push_back(idx);
+        }
+        count = 0;
+    } while (std::next_permutation(jet_labels.begin(), jet_labels.end()));
+    return permutations;
+}
+
+std::map<std::string, std::map<int, ROOT::RVecI>> get_permut_indexes_per_N (size_t MAX_N_JETS) {
+    std::map<int, ROOT::RVecI> w1, w2, had, lep;
+    std::string base = "wwhl";
+    for (int N = 4; N <= MAX_N_JETS; ++N) {
+        std::string jet_labels = base + std::string(MAX_N_JETS-N, 'o');
+        std::map<std::string, std::vector<int>> permuts = _get_permut_indexes(jet_labels);
+        w1[N] = permuts["w1"];
+        w2[N] = permuts["w2"];
+        had[N] = permuts["h"];
+        lep[N] = permuts["l"];
+    }
+    return {{"w1", w1}, {"w2", w2}, {"had", had}, {"lep", lep}};
+}
+
 
 std::map<std::string, fastforest::FastForest> get_fastforests (const std::string& path_to_models, size_t nfeatures) {
 
