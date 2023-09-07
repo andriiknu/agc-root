@@ -5,7 +5,7 @@
 #include <algorithm>
 #include "ROOT/RVec.hxx"
 
-std::map<std::string, std::vector<int>> _get_permut_indexes (std::string jet_labels) {
+std::map<std::string, std::vector<int>> get_permutations (std::string jet_labels) {
 
     std::sort(jet_labels.begin(), jet_labels.end());
     std::map<std::string, std::vector<int>> permutations;
@@ -22,20 +22,21 @@ std::map<std::string, std::vector<int>> _get_permut_indexes (std::string jet_lab
     return permutations;
 }
 
-std::map<std::string, std::map<int, ROOT::RVecI>> get_permut_indexes_per_N (size_t MAX_N_JETS) {
-    std::map<int, ROOT::RVecI> w1, w2, had, lep;
+std::map<int, std::vector<ROOT::RVecI>> get_permutations_dict (size_t MAX_N_JETS) {
+    std::map<int, std::vector<ROOT::RVecI> > permutations_dict;
     std::string base = "wwhl";
     for (int N = 4; N <= MAX_N_JETS; ++N) {
-        std::string jet_labels = base + std::string(MAX_N_JETS-N, 'o');
-        std::map<std::string, std::vector<int>> permuts = _get_permut_indexes(jet_labels);
-        w1[N] = permuts["w1"];
-        w2[N] = permuts["w2"];
-        had[N] = permuts["h"];
-        lep[N] = permuts["l"];
+        std::string jet_labels = base + std::string(N-4, 'o');
+        std::map<std::string, std::vector<int>> permutations = get_permutations (jet_labels);
+        permutations_dict[N] = std::vector<ROOT::RVecI>{permutations["w1"], permutations["w2"], permutations["h"], permutations["l"]};
     }
-    return {{"w1", w1}, {"w2", w2}, {"had", had}, {"lep", lep}};
+    std::map<int, std::vector<ROOT::RVecI>> permutations;// = get_permutations_dict(MAX_N_JETS);
+    permutations[4] = std::vector<ROOT::RVecI>{{1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3},
+       {0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 2, 2},
+       {2, 3, 1, 3, 0, 3, 1, 2, 0, 2, 0, 1},
+       {3, 2, 3, 1, 3, 0, 2, 1, 2, 0, 1, 0}};
+    return permutations;
 }
-
 
 std::map<std::string, fastforest::FastForest> get_fastforests (const std::string& path_to_models, size_t nfeatures) {
 
@@ -48,6 +49,9 @@ std::map<std::string, fastforest::FastForest> get_fastforests (const std::string
     auto feven = fastforest::load_txt(path_to_models+"even.txt", feature_names);
     return {{"even",feven}, {"odd", fodd}};
 }
+
+
+
 
     
 ROOT::RVecF inference(const std::vector<ROOT::RVecF> &features, const fastforest::FastForest &forest, bool check_features=false) {

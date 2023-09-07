@@ -191,6 +191,8 @@ def book_histos(
     inference = False
 ) -> tuple[list[AGCResult]]:
     """Return the RDataFrame results pertaining to the desired process and variation."""
+
+    df = df.Range(15,16)
     # Calculate normalization for MC
     x_sec = XSEC_INFO[process]
     lumi = 3378  # /pb
@@ -268,7 +270,10 @@ def book_histos(
     # Define trijet_mass observable for the 4j2b region (this one is more complicated)
     df4j2b = define_trijet_mass(df)
 
-
+    print()
+    be = df4j2b.Define('size', 'for (int i = 0; i < Jet_pt_cut.size() ; ++i) {cout << Jet_pt_cut[i] << " ";}; return Jet_pt_cut.size();').AsNumpy(['size'])
+    print()
+    
     # Select the right VariationsFor function depending on RDF or DistRDF
     if type(df).__module__ == "DistRDF.Proxy":
         variationsfor_func = ROOT.RDF.Experimental.Distributed.VariationsFor
@@ -293,8 +298,40 @@ def book_histos(
     ml_results = []
     
     if not inference: return (results, ml_results)
+    print()
+    be = df4j2b.Define('size', 'for (int i = 0; i < Jet_pt_cut.size() ; ++i) {cout << Jet_pt_cut[i] << " ";}; return Jet_pt_cut.size();').AsNumpy(['size'])
+    print()
 
-    df4j2b_ml =  define_features (df4j2b, MAX_N_JETS=4)
+    df4j2b_ml =  define_features (df4j2b)
+
+    arrays_dict = df4j2b_ml.AsNumpy(features)
+    event = df4j2b_ml.AsNumpy(["event"])["event"]
+    if len(event) > 1: raise Exception
+    if len(event) == 1: 
+        event = event[0]
+    feature_arrays = []
+    import numpy as np
+    for feature in features:
+        arrays = arrays_dict[feature]
+        if len(arrays) == 0: continue
+        # print (feature)
+        for rvec in arrays:
+            if len(rvec)>1: feature_arrays.append(np.array(rvec))
+    if len(feature_arrays):
+        feature_arrays = np.array(feature_arrays).transpose()
+        print(feature_arrays.shape)
+        np.save(f"arrays/{event}.npy", feature_arrays)
+        jet_pt_cut = df4j2b_ml.AsNumpy(['Jet_pt_cut'])['Jet_pt_cut']
+        print('_________')
+        size = df4j2b_ml.Define('size', 'for (int i = 0; i < Jet_pt_cut.size() ; ++i) {cout << Jet_pt_cut[i] << " ";}; return Jet_pt_cut.size();').AsNumpy(["size"])["size"]
+        print()
+        # if len(jet_pt_cut) != 1: raise Exception
+        # jet_pt_cut = jet_pt_cut[0]
+        # jet_pt_cut = np.array(jet_pt_cut)
+        # np.save(f"arrays/Jpt_{event}.npy", jet_pt_cut)
+
+    df4j2b_ml = predict(df4j2b_ml)
+    
 
     for observable in features:
         
@@ -302,7 +339,8 @@ def book_histos(
         histo_model = ROOT.RDF.TH1DModel(
             name=f"{region}_{process}_{variation}", title=process, nbinsx=25, xlow=50, xup=550
         )
-        nominal_histo = df4j2b_ml.Define(f'f{observable}', f'{observable}').Histo1D(histo_model, f'f{observable}', "Weights")
+
+        nominal_histo = df4j2b_ml.Define(f'f{observable}',f'{observable}[perm_idx]').Histo1D(histo_model, f'f{observable}', "Weights")
 
         if variation == "nominal":
             varied_histos = variationsfor_func(nominal_histo)
@@ -348,7 +386,7 @@ def main() -> None:
 
     if args.scheduler == "mt":
         # Setup for local, multi-thread RDataFrame
-        ROOT.EnableImplicitMT(args.ncores)
+        # ROOT.EnableImplicitMT(args.ncores)
         print(f"Number of threads: {ROOT.GetThreadPoolSize()}")
         client = None
         load_cpp()
@@ -368,7 +406,7 @@ def main() -> None:
 
     if args.inference: 
         inference = True
-        define_cpp("./fastforest")
+        define_cpp("./fastforest", 4)
     else: inference = False
     for input in inputs:
         df = make_rdf(input.paths, client, args.npartitions)
