@@ -54,7 +54,7 @@ std::map<std::string, fastforest::FastForest> get_fastforests (const std::string
 
 
     
-ROOT::RVecF inference(const std::vector<ROOT::RVecF> &features, const fastforest::FastForest &forest, bool check_features=false) {
+ROOT::RVecF inference(const ROOT::VecOps::RVec<ROOT::RVecD> &features, const fastforest::FastForest &forest, bool check_features=false) {
 
     size_t npermutations = features.at(0).size();
     size_t nfeatures = features.size();

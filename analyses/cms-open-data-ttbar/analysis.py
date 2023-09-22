@@ -4,9 +4,10 @@ from pathlib import Path
 from time import time
 from typing import Optional
 
+import numpy as np
 import ROOT
 from distributed import Client, LocalCluster, SSHCluster, get_worker
-from plotting import save_plots
+from plotting import save_plots, save_ml_plots
 from utils import (
     AGCInput,
     AGCResult,
@@ -191,8 +192,6 @@ def book_histos(
     inference = False
 ) -> tuple[list[AGCResult]]:
     """Return the RDataFrame results pertaining to the desired process and variation."""
-
-    df = df.Range(15,16)
     # Calculate normalization for MC
     x_sec = XSEC_INFO[process]
     lumi = 3378  # /pb
@@ -269,10 +268,6 @@ def book_histos(
 
     # Define trijet_mass observable for the 4j2b region (this one is more complicated)
     df4j2b = define_trijet_mass(df)
-
-    print()
-    be = df4j2b.Define('size', 'for (int i = 0; i < Jet_pt_cut.size() ; ++i) {cout << Jet_pt_cut[i] << " ";}; return Jet_pt_cut.size();').AsNumpy(['size'])
-    print()
     
     # Select the right VariationsFor function depending on RDF or DistRDF
     if type(df).__module__ == "DistRDF.Proxy":
@@ -287,6 +282,7 @@ def book_histos(
             name=f"{region}_{process}_{variation}", title=process, nbinsx=25, xlow=50, xup=550
         )
         nominal_histo = df.Histo1D(histo_model, observable, "Weights")
+        print(f"{region}_{process}_{variation}", df.AsNumpy([observable])[observable].shape)
 
         if variation == "nominal":
             varied_histos = variationsfor_func(nominal_histo)
@@ -298,49 +294,45 @@ def book_histos(
     ml_results = []
     
     if not inference: return (results, ml_results)
-    print()
-    be = df4j2b.Define('size', 'for (int i = 0; i < Jet_pt_cut.size() ; ++i) {cout << Jet_pt_cut[i] << " ";}; return Jet_pt_cut.size();').AsNumpy(['size'])
-    print()
 
     df4j2b_ml =  define_features (df4j2b)
 
-    arrays_dict = df4j2b_ml.AsNumpy(features)
-    event = df4j2b_ml.AsNumpy(["event"])["event"]
-    if len(event) > 1: raise Exception
-    if len(event) == 1: 
-        event = event[0]
-    feature_arrays = []
-    import numpy as np
-    for feature in features:
-        arrays = arrays_dict[feature]
-        if len(arrays) == 0: continue
-        # print (feature)
-        for rvec in arrays:
-            if len(rvec)>1: feature_arrays.append(np.array(rvec))
-    if len(feature_arrays):
-        feature_arrays = np.array(feature_arrays).transpose()
-        print(feature_arrays.shape)
-        np.save(f"arrays/{event}.npy", feature_arrays)
-        jet_pt_cut = df4j2b_ml.AsNumpy(['Jet_pt_cut'])['Jet_pt_cut']
-        print('_________')
-        size = df4j2b_ml.Define('size', 'for (int i = 0; i < Jet_pt_cut.size() ; ++i) {cout << Jet_pt_cut[i] << " ";}; return Jet_pt_cut.size();').AsNumpy(["size"])["size"]
-        print()
-        # if len(jet_pt_cut) != 1: raise Exception
-        # jet_pt_cut = jet_pt_cut[0]
-        # jet_pt_cut = np.array(jet_pt_cut)
-        # np.save(f"arrays/Jpt_{event}.npy", jet_pt_cut)
+    # columns = features["names"].__str__().replace("[","{").replace("]","}").replace("'","")
+    # expression = f'ROOT::VecOps::RVec<ROOT::RVecF>({columns})'
+    # feature_arrays = df4j2b_ml.Define('f', expression).AsNumpy(['f'])['f']
+    # feature_arrays = extract_features(feature_arrays, max_nevents=100)
+    # np.save(f'data/arrays/features/{process}_{variation}', feature_arrays)
+    # opts = ROOT.RDF.RSnapshotOptions()
+    # opts.fLazy = True
+    df4j2b_ml.Snapshot("features", f"data/features/{process}_{variation}.root", features["names"])
+    # save_array(f'data/arrays/features/{process}_{variation}', rdf2np(df4j2b_ml, features["names"]))
+
+    # expression = f'ROOT::VecOps::RVec<ROOT::RVecF>{set(features)}'.replace("'","")
+    # save_arrays(f'arrays/features/single/{process}_{variation}', df4j2b_ml.Define('features', expression), 'features', limit=1)
+    # save_array(f'arrays/trijetmass/single/{process}_{variation}', df4j2b, "Trijet_mass")
+    
+    
+    # feature_arrays = []
+    # features_2_arrays = df4j2b_ml.AsNumpy(features)
+    # dir = 'features'
+    # if not os.path.exists(dir):
+    #     os.makedirs(dir)
+    # for i in range(min(len(features_2_arrays[features[0]]),20)):
+    #     feature_arrays.append([np.array(array[i]) for _, array in features_2_arrays.items()])
+    # if len(feature_arrays): np.save(os.path.join(dir,f'{process}_{variation}'), np.array(feature_arrays))
+        
 
     df4j2b_ml = predict(df4j2b_ml)
-    
 
-    for observable in features:
-        
+    for i, observable in enumerate(features["names"]): 
         region = observable  
         histo_model = ROOT.RDF.TH1DModel(
-            name=f"{region}_{process}_{variation}", title=process, nbinsx=25, xlow=50, xup=550
+            name=f"{region}_{process}_{variation}", title=process, nbinsx=25, xlow=features["bin_low"][i], xup=features["bin_high"][i]
         )
 
-        nominal_histo = df4j2b_ml.Define(f'f{observable}',f'{observable}[perm_idx]').Histo1D(histo_model, f'f{observable}', "Weights")
+        df4j2b_ml = df4j2b_ml.Define(f'res_{observable}',f'{observable}[perm_idx]')
+
+        nominal_histo = df4j2b_ml.Histo1D(histo_model, f'res_{observable}', "Weights")
 
         if variation == "nominal":
             varied_histos = variationsfor_func(nominal_histo)
@@ -348,6 +340,9 @@ def book_histos(
         else:
             ml_results.append(AGCResult(nominal_histo, region, process, variation, nominal_histo))
         print(f"Booked histogram {histo_model.fName}")
+    df4j2b_ml.Snapshot("features", f"data/inference/{process}_{variation}.root", [f'res_{name}' for name in features["names"]])
+    # save_array(f'data/arrays/results/{process}_{variation}', extract_results(df4j2b_ml, [f'res_{feature}' for feature in features]))
+
 
     
 
@@ -386,7 +381,7 @@ def main() -> None:
 
     if args.scheduler == "mt":
         # Setup for local, multi-thread RDataFrame
-        # ROOT.EnableImplicitMT(args.ncores)
+        ROOT.EnableImplicitMT(args.ncores)
         print(f"Number of threads: {ROOT.GetThreadPoolSize()}")
         client = None
         load_cpp()
@@ -417,8 +412,8 @@ def main() -> None:
 
     # Run the event loops for all processes and variations here
     run_graphs_start = time()
-    run_graphs([r.nominal_histo for r in results])
-    run_graphs([r.nominal_histo for r in ml_results])
+    run_graphs([r.nominal_histo for r in results]+[r.nominal_histo for r in ml_results])
+    # run_graphs([r.nominal_histo for r in ml_results])
 
     print(f"Executing the computation graphs took {time() - run_graphs_start:.2f} seconds")
     if client is not None:
@@ -426,13 +421,13 @@ def main() -> None:
 
     results = postprocess_results(results)
     save_plots(results)
-
     save_histos([r.histo for r in results], output_fname=args.output)
     print(f"Result histograms saved in file {args.output}")
+    
     if inference:
         output_fname=args.output.split('.root')[0]+'_ml.root'
         ml_results = postprocess_results(ml_results)
-        # save_plots(ml_results)
+        save_ml_plots(ml_results)
         save_histos([r.histo for r in ml_results], output_fname=output_fname)
         print(f"Result histograms saved in file {output_fname}")
 
