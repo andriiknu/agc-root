@@ -4,7 +4,6 @@ from pathlib import Path
 from time import time
 from typing import Optional
 
-import numpy as np
 import ROOT
 from distributed import Client, LocalCluster, SSHCluster, get_worker
 from plotting import save_plots, save_ml_plots
@@ -15,22 +14,6 @@ from utils import (
     retrieve_inputs,
     save_histos,
 )
-
-def rdf2np(arrays, dimensions=3):
-    if dimensions == 2:
-        result = np.empty((len(arrays), len(arrays[0])))
-        for x in range(result.shape[0]):
-            for y in range(result.shape[1]):
-                result[x,y] = arrays[x][y]
-    elif dimensions == 3:
-        result = np.empty((len(arrays), len(arrays[0]), len(arrays[0][0])))
-        for x in range(result.shape[0]):
-            for y in range(result.shape[1]):
-                for z in range(result.shape[2]):
-                    result[x, y, z] = arrays[x][y][z]
-    else: raise NotImplementedError
-
-    return result
 
 from ml import *
 
