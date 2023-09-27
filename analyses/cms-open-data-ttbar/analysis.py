@@ -16,6 +16,22 @@ from utils import (
     save_histos,
 )
 
+def rdf2np(arrays, dimensions=3):
+    if dimensions == 2:
+        result = np.empty((len(arrays), len(arrays[0])))
+        for x in range(result.shape[0]):
+            for y in range(result.shape[1]):
+                result[x,y] = arrays[x][y]
+    elif dimensions == 3:
+        result = np.empty((len(arrays), len(arrays[0]), len(arrays[0][0])))
+        for x in range(result.shape[0]):
+            for y in range(result.shape[1]):
+                for z in range(result.shape[2]):
+                    result[x, y, z] = arrays[x][y][z]
+    else: raise NotImplementedError
+
+    return result
+
 from ml import *
 
 # Using https://atlas-groupdata.web.cern.ch/atlas-groupdata/dev/AnalysisTop/TopDataPreparation/XSection-MC15-13TeV.data
@@ -282,7 +298,6 @@ def book_histos(
             name=f"{region}_{process}_{variation}", title=process, nbinsx=25, xlow=50, xup=550
         )
         nominal_histo = df.Histo1D(histo_model, observable, "Weights")
-        print(f"{region}_{process}_{variation}", df.AsNumpy([observable])[observable].shape)
 
         if variation == "nominal":
             varied_histos = variationsfor_func(nominal_histo)
@@ -295,57 +310,23 @@ def book_histos(
     
     if not inference: return (results, ml_results)
 
-    df4j2b_ml =  define_features (df4j2b)
+    df4j2b =  define_features (df4j2b)
+    df4j2b = infer(df4j2b)
 
-    # columns = features["names"].__str__().replace("[","{").replace("]","}").replace("'","")
-    # expression = f'ROOT::VecOps::RVec<ROOT::RVecF>({columns})'
-    # feature_arrays = df4j2b_ml.Define('f', expression).AsNumpy(['f'])['f']
-    # feature_arrays = extract_features(feature_arrays, max_nevents=100)
-    # np.save(f'data/arrays/features/{process}_{variation}', feature_arrays)
-    # opts = ROOT.RDF.RSnapshotOptions()
-    # opts.fLazy = True
-    df4j2b_ml.Snapshot("features", f"data/features/{process}_{variation}.root", features["names"])
-    # save_array(f'data/arrays/features/{process}_{variation}', rdf2np(df4j2b_ml, features["names"]))
-
-    # expression = f'ROOT::VecOps::RVec<ROOT::RVecF>{set(features)}'.replace("'","")
-    # save_arrays(f'arrays/features/single/{process}_{variation}', df4j2b_ml.Define('features', expression), 'features', limit=1)
-    # save_array(f'arrays/trijetmass/single/{process}_{variation}', df4j2b, "Trijet_mass")
-    
-    
-    # feature_arrays = []
-    # features_2_arrays = df4j2b_ml.AsNumpy(features)
-    # dir = 'features'
-    # if not os.path.exists(dir):
-    #     os.makedirs(dir)
-    # for i in range(min(len(features_2_arrays[features[0]]),20)):
-    #     feature_arrays.append([np.array(array[i]) for _, array in features_2_arrays.items()])
-    # if len(feature_arrays): np.save(os.path.join(dir,f'{process}_{variation}'), np.array(feature_arrays))
-        
-
-    df4j2b_ml = predict(df4j2b_ml)
-
-    for i, observable in enumerate(features["names"]): 
-        region = observable  
+    for i, observable in enumerate(features["names"]):  
         histo_model = ROOT.RDF.TH1DModel(
-            name=f"{region}_{process}_{variation}", title=process, nbinsx=25, xlow=features["bin_low"][i], xup=features["bin_high"][i]
+            name=f"{observable}_{process}_{variation}", title=process, nbinsx=25, xlow=features["bin_low"][i], xup=features["bin_high"][i]
         )
 
-        df4j2b_ml = df4j2b_ml.Define(f'res_{observable}',f'{observable}[perm_idx]')
-
-        nominal_histo = df4j2b_ml.Histo1D(histo_model, f'res_{observable}', "Weights")
+        nominal_histo = df4j2b.Histo1D(histo_model, f'results{i}', "Weights")
 
         if variation == "nominal":
             varied_histos = variationsfor_func(nominal_histo)
-            ml_results.append(AGCResult(varied_histos, region, process, variation, nominal_histo))
+            ml_results.append(AGCResult(varied_histos, observable, process, variation, nominal_histo))
         else:
-            ml_results.append(AGCResult(nominal_histo, region, process, variation, nominal_histo))
-        print(f"Booked histogram {histo_model.fName}")
-    df4j2b_ml.Snapshot("features", f"data/inference/{process}_{variation}.root", [f'res_{name}' for name in features["names"]])
-    # save_array(f'data/arrays/results/{process}_{variation}', extract_results(df4j2b_ml, [f'res_{feature}' for feature in features]))
-
-
+            ml_results.append(AGCResult(nominal_histo, observable, process, variation, nominal_histo))
+        print(f"Booked histogram {histo_model.fName}")   
     
-
     # Return the booked results
     # Note that no event loop has run yet at this point (RDataFrame is lazy)
     return (results, ml_results)
@@ -413,7 +394,6 @@ def main() -> None:
     # Run the event loops for all processes and variations here
     run_graphs_start = time()
     run_graphs([r.nominal_histo for r in results]+[r.nominal_histo for r in ml_results])
-    # run_graphs([r.nominal_histo for r in ml_results])
 
     print(f"Executing the computation graphs took {time() - run_graphs_start:.2f} seconds")
     if client is not None:
@@ -425,9 +405,9 @@ def main() -> None:
     print(f"Result histograms saved in file {args.output}")
     
     if inference:
-        output_fname=args.output.split('.root')[0]+'_ml.root'
         ml_results = postprocess_results(ml_results)
         save_ml_plots(ml_results)
+        output_fname=args.output.split('.root')[0]+'_ml.root'
         save_histos([r.histo for r in ml_results], output_fname=output_fname)
         print(f"Result histograms saved in file {output_fname}")
 

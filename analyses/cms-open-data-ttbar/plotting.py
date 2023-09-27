@@ -101,5 +101,5 @@ def save_ml_plots(results: list[AGCResult]):
             hs.Add(h)       
         hs.Draw("hist pfc plc")  
         c.BuildLegend()
-        c.Print( "features.pdf" + (i==0) * "(" + ( i==len(features["names"])) * ")" )
+        c.Print( "features.pdf" + (i==0) * "(" + ( i+1 == len(features["names"])) * ")" )
         
