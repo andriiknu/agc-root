@@ -370,7 +370,7 @@ def main() -> None:
     if args.inference:
         # hardcoded for now: we expect ROOT to integrate FastForest soon
         fastforest_path="./fastforest" # the path for fastforest libraries and headers
-        setup_mlhelpers_cpp(fastforest_path) 
+        setup_mlhelpers_cpp(fastforest_path, max_n_jets=4)
 
     for input in inputs:
         df = make_rdf(input.paths, client, args.npartitions)

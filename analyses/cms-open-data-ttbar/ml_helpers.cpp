@@ -60,12 +60,12 @@ std::map<int, std::vector<ROOT::RVecI>> get_permutations_dict (size_t max_n_jets
     // every event have different number of jets: from 4 to max_n_jets
     
     std::map<int, std::vector<ROOT::RVecI> > permutations_dict; // number of jets to permutations of jets indexes.
-    std::string base = "wwhl";
-    for (int N = 4; N <= max_n_jets; ++N) {
-        std::string jet_labels = base + std::string(N-4, 'o'); 
-        std::map<std::string, std::vector<int>> permutations = get_permutations (jet_labels);
-        permutations_dict[N] = std::vector<ROOT::RVecI>{permutations["w1"], permutations["w2"], permutations["h"], permutations["l"]};
-    }
+    permutations_dict[4] = {
+        {1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3}, 
+        {0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 2, 2}, 
+        {2, 3, 1, 3, 0, 3, 1, 2, 0, 2, 0, 1}, 
+        {3, 2, 3, 1, 3, 0, 2, 1, 2, 0, 1, 0}
+    };
     return permutations_dict;
 }
 
